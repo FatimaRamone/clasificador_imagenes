@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Predecir Imagen</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.9.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/konva@7.0.5/konva.min.js"></script>
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+    #container {
+      border: 2px solid black;
+    }
+    .btn {
+      display: block;
+      margin-bottom: 10px;
+    }
+    .btn-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="container"></div>
+  <div class="btn-container">
+    <input type="file" id="fileInput" class="btn">
+    <button id="predictBtn" class="btn">Predecir</button>
+    <button id="refreshBtn" class="btn">Refrescar</button>
+  </div>
+  <script>
+    var container = document.getElementById('container');
+    var stage = new Konva.Stage({
+      container: container,
+      width: window.innerWidth / 2,
+      height: window.innerHeight / 2,
+    });
+    var layer = new Konva.Layer();
+    stage.add(layer);
+    var isDrawing = false;
+    var lastPointerPosition;
+
+    stage.on('mousedown touchstart', function (e) {
+      isDrawing = true;
+      lastPointerPosition = stage.getPointerPosition();
+    });
+
+    stage.on('mousemove touchmove', function () {
+      if (!isDrawing) {
+        return;
+      }
+      var pointerPosition = stage.getPointerPosition();
+      var line = new Konva.Line({
+        points: [lastPointerPosition.x, lastPointerPosition.y, pointerPosition.x, pointerPosition.y],
+        stroke: 'black',
+        strokeWidth: 5,
+        lineCap: 'round',
+        lineJoin: 'round',
+      });
+      layer.add(line);
+      lastPointerPosition = pointerPosition;
+      layer.batchDraw();
+    });
+
+    stage.on('mouseup touchend', function () {
+      isDrawing = false;
+    });
+
+    async function predictAndSendData() {
+      console.log("Iniciando predicción...");
+      var dataURL = stage.toDataURL();
+      console.log("Datos del lienzo obtenidos:", dataURL);
+      if (!dataURL) {
+        alert("Por favor, dibuja o carga una imagen antes de predecir.");
+        return;
+      }
+      
+      var img = new Image();
+      img.src = dataURL;
+      img.onload = async function() {
+        var canvas = document.createElement('canvas');
+        canvas.width = 28;
+        canvas.height = 28;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, 28, 28);
+        var imageData = ctx.getImageData(0, 0, 28, 28);
+        var tensor = tf.browser.fromPixels(imageData, 1);
+        var tensorArray = Array.from(tensor.dataSync());
+        await predictFromArray(tensorArray);
+      };
+    }
+
+    document.getElementById('predictBtn').addEventListener('click', predictAndSendData);
+
+    document.getElementById('fileInput').addEventListener('change', function(event) {
+      var file = event.target.files[0];
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        var img = new Image();
+        img.onload = async function() {
+          var canvas = document.createElement('canvas');
+          canvas.width = 28;
+          canvas.height = 28;
+          var ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, 28, 28);
+          var imageData = ctx.getImageData(0, 0, 28, 28);
+          var tensor = tf.browser.fromPixels(imageData, 1);
+          var tensorArray = Array.from(tensor.dataSync());
+          await predictFromArray(tensorArray);
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    document.getElementById('refreshBtn').addEventListener('click', function() {
+      location.reload();
+    });
+
+    async function predictFromArray(tensorArray) {
+      // Normalizar los valores de píxel
+      const normalized = tensorArray.map(val => val / 255.0);
+      // Enviar los datos de la imagen normalizados al backend
+      const response = await fetch('http://localhost:8000', {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ data: normalized })
+      });
+
+      console.log("Respuesta del backend:", response);
+
+      const predictionData = await response.json();
+      alert('La predicción es: ' + predictionData.prediction);
+      console.log("Predicción recibida:", predictionData.prediction);
+    }
+
+  </script>
+</body>
+</html>
